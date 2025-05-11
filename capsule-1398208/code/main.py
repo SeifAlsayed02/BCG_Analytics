@@ -22,8 +22,8 @@ from data_subplot import data_subplot
 print('\nstart processing ...')
 
 # File paths
-bcg_file = '/Volumes/MySSD/Data Analytics/capsule-1398208/dataset/data/01/BCG/01_20231105_BCG.csv'
-ecg_file = '/Volumes/MySSD/Data Analytics/capsule-1398208/dataset/data/01/Reference/RR/01_20231105_RR.csv'
+bcg_file = '/Volumes/MySSD/Data Analytics Team 1/capsule-1398208/dataset/data/01/BCG/01_20231105_BCG.csv'
+ecg_file = '/Volumes/MySSD/Data Analytics Team 1/capsule-1398208/dataset/data/01/Reference/RR/01_20231105_RR.csv'
 
 # Load BCG data
 if bcg_file.endswith(".csv"):
@@ -151,6 +151,56 @@ events = apnea_events(breathing, resampled_utc_time, thresh=thresh)
 t1, t2 = 2500, 5000  # Window from 50 to 100 seconds at 50 Hz
 data_subplot(resampled_bcg_data, movement, breathing, wavelet_cycle, t1, t2)
 
+# ----- J-Peak Detection Attempt -----
+def naive_j_peak_detection(bcg_signal, r_peak_indices, search_window_ms=100, fs=50):
+    """
+    A very basic attempt to find J-peaks in a BCG signal.
+    This is highly simplified and will likely need significant tuning.
+
+    Args:
+        bcg_signal: The filtered BCG signal.
+        r_peak_indices: Indices of the R-peaks (or BCG equivalent) in the BCG signal.
+        search_window_ms:  How many milliseconds after the R-peak to look for a J-peak.
+        fs: Sampling rate of the BCG signal.
+
+    Returns:
+        A list of indices where J-peaks are tentatively located.
+    """
+
+    j_peak_indices = []
+    search_window_samples = int(search_window_ms * (fs / 1000))  # Window in samples
+
+    for r_index in r_peak_indices:
+        start_search = r_index + 1  # Don't search at the R-peak itself
+        end_search = min(len(bcg_signal), r_index + search_window_samples)
+
+        if start_search < end_search:
+            window = bcg_signal[start_search:end_search]
+            if len(window) > 0:
+              j_peak_local_index = np.argmax(window)  # Index relative to the window
+              j_peak_index = start_search + j_peak_local_index
+              j_peak_indices.append(j_peak_index)
+
+    return j_peak_indices
+
+#  1. Find R-peak proxies in BCG (using your existing peak detection)
+#     -  This is CRITICAL:  BCG "R-peaks" are NOT the same as ECG R-peaks.
+#     -  We're finding the BCG wave that corresponds *roughly* to the heartbeat.
+bcg_r_peak_indices = detect_peaks(wavelet_cycle, mpd=20)  # Adjust 'mpd'!
+
+#  2. Detect J-peaks relative to those BCG "R-peaks"
+bcg_j_peak_indices = naive_j_peak_detection(wavelet_cycle, bcg_r_peak_indices, search_window_ms=80, fs=fs) # Tune window!
+
+# ----- End J-Peak Detection -----
+
+# Output the detected J-peak indices and times
+if bcg_j_peak_indices:
+    j_peak_times = resampled_utc_time[bcg_j_peak_indices]
+    print("\nDetected J-peak Indices (in resampled BCG signal):", bcg_j_peak_indices)
+    print("Detected J-peak Times:", j_peak_times)
+else:
+    print("\nNo J-peaks detected.")
+
 # Evaluation Metrics: Compare estimated HR with reference ECG HR (if synced data exists)
 if len(ecg_hr) > 0:
     # Interpolate ECG HR to match the time points of beats
@@ -203,4 +253,16 @@ if len(ecg_hr) > 0:
 else:
     print("\nWarning: No ECG data for evaluation metrics due to no overlap.")
 
+# ----- J-Peak Visualization (Illustrative) -----
+plt.figure(figsize=(10, 5))
+plt.plot(resampled_utc_time, wavelet_cycle, label='BCG Wavelet', color='blue')
+plt.plot(resampled_utc_time[bcg_r_peak_indices], wavelet_cycle[bcg_r_peak_indices], 'ro', label='BCG "R-peaks"')
+plt.plot(resampled_utc_time[bcg_j_peak_indices], wavelet_cycle[bcg_j_peak_indices], 'go', label='Detected J-peaks')
+plt.xlabel('Time')
+plt.ylabel('Amplitude')
+plt.title('BCG with Detected Peaks')
+plt.legend()
+plt.savefig('j_peak_visualization.png') # Changed from plt.show() to plt.savefig()
+
 print('\nEnd processing ...')
+s
